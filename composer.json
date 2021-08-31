@@ -1,0 +1,35 @@
+{
+    "name": "mikeyc7m/gridfieldsummary",
+    "type": "silverstripe-vendormodule",
+    "description": "Adds a footer to gridfields with sums & counts.",
+    "keywords": [
+        "silverstripe",
+        "gridfield"
+    ],
+    "license": "BSD-3-Clause",
+    "authors": [
+        {
+            "name": "Michael Caruana"
+        }
+    ],
+    "require": {
+        "php": ">=7.2",
+        "silverstripe/framework": "^4"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^5.7"
+    },
+    "extra": {
+        "expose": [
+            "client"
+        ]
+    },
+    "autoload": {
+        "psr-4": {
+            "Mikeyc7m\\GridfieldSummary\\": "src/",
+            "Mikeyc7m\\GridfieldSummary\\Tests\\": "tests/"
+        }
+    },
+    "prefer-stable": true,
+    "minimum-stability": "dev"
+}

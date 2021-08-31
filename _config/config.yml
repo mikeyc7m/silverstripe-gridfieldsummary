@@ -1,0 +1,6 @@
+---
+Name: gridfieldsummary
+---
+SilverStripe\Admin\LeftAndMain:
+  extra_requirements_css:
+    - 'mikeyc7m/gridfieldsummary: client/leftandmain-extra.css'

@@ -1,0 +1,27 @@
+/* make the header & footer sticky */
+.table.grid-field__table thead tr:last-child th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #fafbfc linear-gradient(360deg, #dbe0e9 0px, #fafbfc 1px, #fafbfc);
+}
+
+.table.grid-field__table tfoot tr:last-child td {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    background: #fafbfc linear-gradient(#dbe0e9 0px, #fafbfc 1px, #fafbfc);
+}
+
+.panel--padded .table.grid-field__table thead tr:last-child th {
+    top: -1.5385rem;
+}
+
+.panel--padded .table.grid-field__table tfoot tr:last-child td {
+    bottom: -1.5385rem;
+}
+
+/* darken the summary row */
+.table.grid-field__table tfoot tr {
+    background: #dbe0e9;
+}
