@@ -6,8 +6,13 @@ use DateTime;
 use SilverStripe\Forms\GridField\GridField_DataManipulator;
 use SilverStripe\Forms\GridField\GridField_HTMLProvider;
 use SilverStripe\ORM\ArrayList;
+use SilverStripe\ORM\FieldType\DBBoolean;
+use SilverStripe\ORM\FieldType\DBCurrency;
 use SilverStripe\ORM\FieldType\DBDate;
 use SilverStripe\ORM\FieldType\DBDatetime;
+use SilverStripe\ORM\FieldType\DBDecimal;
+use SilverStripe\ORM\FieldType\DBFloat;
+use SilverStripe\ORM\FieldType\DBInt;
 use SilverStripe\ORM\ManyManyList;
 use SilverStripe\View\ArrayData;
 use SilverStripe\View\SSViewer;
@@ -75,10 +80,13 @@ class GridFieldSummaryFooter implements GridField_HTMLProvider
                 return null;
             };
 
-            if (in_array($fieldType, ['Int', 'Float', 'Decimal', 'Currency']))
+            if (in_array($fieldType, [
+                'Int', 'Float', 'Decimal', 'Currency',
+                DBInt::class, DBFloat::class, DBDecimal::class, DBCurrency::class
+            ]))
                 // db field is a number of some sort, do a sum!
                 return DBField::create_field($fieldType, $list->sum($fieldName))->Nice();
-            elseif (in_array($fieldType, ['DateTime', 'Date'])) {
+            elseif (in_array($fieldType, ['DateTime', 'Date', DBDate::class, DBDatetime::class])) {
                 // db field is a date, do a range!
                 $min = new DateTime($list->min($fieldName));
                 $max = new DateTime($list->max($fieldName));
@@ -91,6 +99,13 @@ class GridFieldSummaryFooter implements GridField_HTMLProvider
                 if ($interval->i >= 1) $str[] = $pluralize($interval->i, 'min');
                 if ($interval->s >= 1) $str[] = $pluralize($interval->s, 'sec');
                 return DBField::create_field('Varchar', implode(', ', array_filter($str)));
+            } elseif (in_array($fieldType, ['Boolean', DBBoolean::class])) {
+                // db field is a boolean, do a count of true vs false
+                $true = $list->filter($fieldName, true)->count();
+                $false = $list->count() - $true;
+                $trueText = DBField::create_field($fieldType, true)->Nice();
+                $falseText = DBField::create_field($fieldType, false)->Nice();
+                return DBField::create_field('Varchar', "$true $trueText, $false $falseText");
             }
             // dunno what this is, abort.
             return null;
