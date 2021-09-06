@@ -106,6 +106,15 @@ class GridFieldSummaryFooter implements GridField_HTMLProvider
                 $trueText = DBField::create_field($fieldType, true)->Nice();
                 $falseText = DBField::create_field($fieldType, false)->Nice();
                 return DBField::create_field('Varchar', "$true $trueText, $false $falseText");
+            } elseif (strpos($fieldType, 'Enum') === 0) {
+                // db field is a list of possible values, do a count of each
+                $obj = singleton($list->dataClass);
+                $enums = $obj->dbObject($fieldName)->enumValues();
+                $counts = [];
+                foreach ($enums as $enum) {
+                    $counts[] =  $list->filter($fieldName, $enum)->count(). " $enum";
+                }
+                return DBField::create_field('Varchar', implode(', ', $counts));
             }
             // dunno what this is, abort.
             return null;
