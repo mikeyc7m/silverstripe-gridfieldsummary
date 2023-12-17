@@ -88,8 +88,8 @@ class GridFieldSummaryFooter implements GridField_HTMLProvider
                 return DBField::create_field($fieldType, $list->sum($fieldName))->Nice();
             elseif (in_array($fieldType, ['DateTime', 'Date', DBDate::class, DBDatetime::class])) {
                 // db field is a date, do a range!
-                $min = new DateTime($list->min($fieldName));
-                $max = new DateTime($list->max($fieldName));
+                $min = new DateTime($list->min($fieldName) ?: '');
+                $max = new DateTime($list->max($fieldName) ?: '');
                 $interval = $max->diff($min);
                 $str = [];
                 if ($interval->y >= 1) $str[] = $pluralize($interval->y, 'year');
