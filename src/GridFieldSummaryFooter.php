@@ -22,6 +22,19 @@ use SilverStripe\Core\ClassInfo;
 
 class GridFieldSummaryFooter implements GridField_HTMLProvider
 {
+    private const NUMERIC_TYPES = [
+        'Int', 'Float', 'Decimal', 'Currency',
+        DBInt::class, DBFloat::class, DBDecimal::class, DBCurrency::class,
+    ];
+
+    private const DATE_TYPES = [
+        'DateTime', 'Date', DBDate::class, DBDatetime::class,
+    ];
+
+    private const BOOLEAN_TYPES = [
+        'Boolean', DBBoolean::class,
+    ];
+
     private $fragment;
 
     public function __construct($fragment = 'footer')
@@ -29,165 +42,234 @@ class GridFieldSummaryFooter implements GridField_HTMLProvider
         $this->fragment = $fragment;
     }
 
+    protected function getDateRangeLabel($span, $format)
+    {
+        $ref = null;
+
+        switch ($format) {
+            case 'sec':
+                $ref = '.SECONDS_SHORT_PLURALS';
+                break;
+            case 'min':
+                $ref = '.MINUTES_SHORT_PLURALS';
+                break;
+            case 'hour':
+                $ref = '.HOURS_SHORT_PLURALS';
+                break;
+            case 'day':
+                $ref = '.DAYS_SHORT_PLURALS';
+                break;
+            case 'month':
+                $ref = '.MONTHS_SHORT_PLURALS';
+                break;
+            case 'year':
+                $ref = '.YEARS_SHORT_PLURALS';
+                break;
+        }
+
+        if ($ref) {
+            return _t(
+                DBDate::class . $ref,
+                "{count} {$format}|{count} {$format}s",
+                ['count' => $span]
+            );
+        }
+
+        return null;
+    }
+
+    protected function summariseDatabaseField($fieldType, $fieldName, $list, $listCount)
+    {
+        if (in_array($fieldType, self::NUMERIC_TYPES, true)) {
+            return DBField::create_field($fieldType, $list->sum($fieldName))->Nice();
+        }
+
+        if (in_array($fieldType, self::DATE_TYPES, true)) {
+            $min = $list->min($fieldName);
+            $max = $list->max($fieldName);
+
+            if ($min && $max) {
+                $interval = (new DateTime($max))->diff(new DateTime($min));
+                $parts = [];
+
+                if ($interval->y >= 1) $parts[] = $this->getDateRangeLabel($interval->y, 'year');
+                if ($interval->m >= 1) $parts[] = $this->getDateRangeLabel($interval->m, 'month');
+                if ($interval->d >= 1) $parts[] = $this->getDateRangeLabel($interval->d, 'day');
+                if ($interval->h >= 1) $parts[] = $this->getDateRangeLabel($interval->h, 'hour');
+                if ($interval->i >= 1) $parts[] = $this->getDateRangeLabel($interval->i, 'min');
+                if ($interval->s >= 1) $parts[] = $this->getDateRangeLabel($interval->s, 'sec');
+
+                return DBField::create_field('Varchar', implode(', ', array_filter($parts)));
+            }
+
+            return null;
+        }
+
+        if (in_array($fieldType, self::BOOLEAN_TYPES, true)) {
+            $true = 0;
+            $false = 0;
+
+            foreach ($list as $item) {
+                $value = $item->$fieldName;
+                $value = is_object($value) ? $value->Value : $value;
+                if ($value) {
+                    $true++;
+                } else {
+                    $false++;
+                }
+            }
+
+            $trueText = DBField::create_field($fieldType, true)->Nice();
+            $falseText = DBField::create_field($fieldType, false)->Nice();
+
+            return DBField::create_field('Varchar', "$true $trueText, $false $falseText");
+        }
+
+        if (strpos($fieldType, 'Enum') === 0) {
+            $dbObject = singleton($list->dataClass)->dbObject($fieldName);
+            $enumValues = $dbObject->enumValues();
+            $counts = array_fill_keys($enumValues, 0);
+
+            foreach ($list as $item) {
+                $value = $item->$fieldName;
+                $value = is_object($value) ? $value->Value : $value;
+
+                if (array_key_exists((string) $value, $counts)) {
+                    $counts[(string) $value]++;
+                }
+            }
+
+            if ($listCount > 0) {
+                $parts = [];
+
+                foreach ($enumValues as $enum) {
+                    $parts[] = ($counts[$enum] ?? 0) . " $enum";
+                }
+
+                return DBField::create_field('Varchar', implode(', ', $parts));
+            }
+        }
+
+        return null;
+    }
+
+    protected function summariseMethodField($fieldName, $list, $obj)
+    {
+        $sum = 0;
+        $test = $obj->$fieldName();
+        $type = 'Float';
+
+        if (is_object($test)) {
+            $type = ClassInfo::class_name($test);
+            $test = $test->Value;
+        }
+
+        if (!is_numeric($test)) {
+            return null;
+        }
+
+        foreach ($list as $item) {
+            $value = $item->$fieldName();
+            $sum += is_object($value) ? $value->Value : $value;
+        }
+
+        return DBField::create_field($type, $sum)->Nice();
+    }
+
+    protected function getSummaryValue($fieldName, $fieldType, $list, $listCount, $obj, $extraData = [])
+    {
+        $value = null;
+
+        if (isset($fieldType)) {
+            $value = $this->summariseDatabaseField($fieldType, $fieldName, $list, $listCount);
+        }
+
+        if ($value === null && ClassInfo::hasMethod($obj, $fieldName)) {
+            $value = $this->summariseMethodField($fieldName, $list, $obj);
+        }
+
+        if ($value === null && !empty($extraData)) {
+            foreach ($extraData as $extraField => $extraSpec) {
+                if ($extraField === $fieldName) {
+                    $value = $this->summariseDatabaseField($extraSpec, $extraField, $list, $listCount);
+                    break;
+                }
+            }
+        }
+
+        if ($value === null) {
+            $bits = explode('.', $fieldName);
+            $last = $bits[count($bits) - 1];
+
+            if ($last === 'Count') {
+                $clause = preg_replace('/\.Count$/', '', $fieldName);
+                $sum = 0;
+
+                foreach ($list as $item) {
+                    $sum += $item->$clause()->Count();
+                }
+
+                $value = DBField::create_field('Int', $sum)->Nice();
+            } elseif (($thing = $last) && in_array($thing, ['Sum', 'Min', 'Max'], true)) {
+                $field = preg_replace('/.*\.' . $thing . '\((.*)\)$/', '$1', $fieldName);
+                $clause = preg_replace('/\.' . $thing . '\((.*)\)$/', '', $fieldName);
+                $sum = 0;
+
+                foreach ($list as $item) {
+                    $sum += $item->$clause()->{$thing}($field);
+                }
+
+                $value = DBField::create_field('Int', $sum)->Nice();
+            }
+        }
+
+        return $value;
+    }
+
     public function getHTMLFragments($gridField): ?array
     {
         $cols = $gridField->getColumns();
         $list = $gridField->getList();
+
         foreach ($gridField->getComponents() as $item) {
             if ($item instanceof GridField_DataManipulator && !($item instanceof GridFieldPaginator)) {
                 $list = $item->getManipulatedData($gridField, $list);
             }
         }
+
+        if (empty($cols) || !$list) {
+            return null;
+        }
+
         $dataCount = 0;
         $summaryVals = ArrayList::create();
-        $obj = singleton($list->dataClass);
-        $db = $obj->getSchema()->databaseFields($list->dataClass);
+        $dataClass = $list->dataClass;
+        $obj = singleton($dataClass);
+        $db = $obj->getSchema()->databaseFields($dataClass);
         $extraData = ClassInfo::class_name($list) == ManyManyList::class ? $list->getExtraFields() : [];
-
-        // this function determines if we can do some math on the data.
-        $tryMath = function (string $fieldType, string $fieldName) use ($list) {
-            // here's a helper funtion to format nice date ranges...
-            $pluralize = function ($span, $format) {
-                $ref;
-                switch ($format) {
-                    case 'sec':
-                        $ref = '.SECONDS_SHORT_PLURALS';
-                        break;
-                    case 'min':
-                        $ref = '.MINUTES_SHORT_PLURALS';
-                        break;
-                    case 'hour':
-                        $ref = '.HOURS_SHORT_PLURALS';
-                        break;
-                    case 'day':
-                        $ref = '.DAYS_SHORT_PLURALS';
-                        break;
-                    case 'month':
-                        $ref = '.MONTHS_SHORT_PLURALS';
-                        break;
-                    case 'year':
-                        $ref = '.YEARS_SHORT_PLURALS';
-                        break;
-                }
-                if ($ref) {
-                    return _t(
-                        DBDate::class . $ref,
-                        "{count} {$format}|{count} {$format}s",
-                        ['count' => $span]
-                    );
-                }
-                // dunno what this is, abort.
-                return null;
-            };
-
-            if (in_array($fieldType, [
-                'Int', 'Float', 'Decimal', 'Currency',
-                DBInt::class, DBFloat::class, DBDecimal::class, DBCurrency::class
-            ]))
-                // db field is a number of some sort, do a sum!
-                return DBField::create_field($fieldType, $list->sum($fieldName))->Nice();
-            elseif (in_array($fieldType, ['DateTime', 'Date', DBDate::class, DBDatetime::class])) {
-                // db field is a date, do a range!
-                $min = new DateTime($list->min($fieldName) ?: '');
-                $max = new DateTime($list->max($fieldName) ?: '');
-                $interval = $max->diff($min);
-                $str = [];
-                if ($interval->y >= 1) $str[] = $pluralize($interval->y, 'year');
-                if ($interval->m >= 1) $str[] = $pluralize($interval->m, 'month');
-                if ($interval->d >= 1) $str[] = $pluralize($interval->d, 'day');
-                if ($interval->h >= 1) $str[] = $pluralize($interval->h, 'hour');
-                if ($interval->i >= 1) $str[] = $pluralize($interval->i, 'min');
-                if ($interval->s >= 1) $str[] = $pluralize($interval->s, 'sec');
-                return DBField::create_field('Varchar', implode(', ', array_filter($str)));
-            } elseif (in_array($fieldType, ['Boolean', DBBoolean::class])) {
-                // db field is a boolean, do a count of true vs false
-                $true = $list->filter($fieldName, true)->count();
-                $false = $list->count() - $true;
-                $trueText = DBField::create_field($fieldType, true)->Nice();
-                $falseText = DBField::create_field($fieldType, false)->Nice();
-                return DBField::create_field('Varchar', "$true $trueText, $false $falseText");
-            } elseif (strpos($fieldType, 'Enum') === 0) {
-                // db field is a list of possible values, do a count of each
-                $obj = singleton($list->dataClass);
-                $enums = $obj->dbObject($fieldName)->enumValues();
-                $counts = [];
-                foreach ($enums as $enum) {
-                    $counts[] =  $list->filter($fieldName, $enum)->count(). " $enum";
-                }
-                return DBField::create_field('Varchar', implode(', ', $counts));
-            }
-            // dunno what this is, abort.
-            return null;
-        };
+        $listCount = $list->count();
 
         foreach ($cols as $col) {
-            $val = '';
-            if (isset($db[$col]) && $val = $tryMath($db[$col], $col)) {
-                // db field is a number of some sort, do math!
+            $val = $this->getSummaryValue($col, $db[$col] ?? null, $list, $listCount, $obj, $extraData);
+
+            if ($val !== null) {
                 $dataCount++;
-
-            } elseif (ClassInfo::hasMethod($obj, $col)) {
-                // it's a function, see if it returns a number we can sum!
-                $sum = 0;
-                $test = $obj->$col();
-                $type = 'Float';
-
-                if (is_object($test)) {
-                    $type = ClassInfo::class_name($test);
-                    $test = $test->Value;
-                }
-                if (is_numeric($test)) {
-                    foreach ($list as $item) {
-                        $val = $item->$col();
-                        $sum += is_object($val) ? $val->Value : $val;
-                    }
-                    $val = DBField::create_field($type, $sum)->Nice();
-                    $dataCount++;
-                }
-            } elseif (count($extraData)) {
-                // catch manyManyExtraFields here, try some math...
-                foreach ($extraData as $field => $spec) {
-                    if ($field == $col && $val = $tryMath($spec, $field)) {
-                        $dataCount++;
-                        break;
-                    }
-                }
-            } else {
-                // catch any child Count() or Sum() statements
-                $sum = 0;
-                $bits = explode('.', $col);
-                if ($bits[count($bits) - 1] == "Count") {
-                    $clause = preg_replace('/\.Count$/', '', $col);
-                    foreach ($list as $item) {
-                        $sum += $item->$clause()->Count();
-                    }
-                    $val = DBField::create_field('Int', $sum)->Nice();
-                    $dataCount++;
-                } elseif (($thing = $bits[count($bits) - 1]) && in_array($thing, ["Sum", "Min", "Max"])) {
-                    $field = preg_replace('/.*\.' . $thing . '\((.*)\)$/', '$1', $col);
-                    $clause = preg_replace('/\.' . $thing . '\((.*)\)$/', '', $col);
-                    foreach ($list as $item) {
-                        $sum += $item->$clause()->{$thing}($field);
-                    }
-                    $val = DBField::create_field('Int', $sum)->Nice();
-                    $dataCount++;
-                }
             }
 
-            $summaryVals->push(ArrayData::create(['Value' => $val]));
-
+            $summaryVals->push(ArrayData::create(['Value' => $val ?? '']));
         }
 
         if ($dataCount) {
-            $forTemplate = new ArrayData(array(
-                'SummaryValues' => $summaryVals
-            ));
+            $forTemplate = new ArrayData([
+                'SummaryValues' => $summaryVals,
+            ]);
 
             $template = SSViewer::get_templates_by_class($this, '', __CLASS__);
-            return array(
-                $this->fragment => $forTemplate->renderWith($template)
-            );
+            return [
+                $this->fragment => $forTemplate->renderWith($template),
+            ];
         }
+
         return null;
     }
 }

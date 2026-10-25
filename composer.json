@@ -14,7 +14,7 @@
     ],
     "require": {
         "php": ">=7.2",
-        "silverstripe/framework": "^4"
+        "silverstripe/framework": "^4 || ^5"
     },
     "require-dev": {
         "phpunit/phpunit": "^5.7"
@@ -26,8 +26,8 @@
     },
     "autoload": {
         "psr-4": {
-            "Mikeyc7m\\GridfieldSummary\\": "src/",
-            "Mikeyc7m\\GridfieldSummary\\Tests\\": "tests/"
+            "Mikeyc7m\\GridFieldSummary\\": "src/",
+            "Mikeyc7m\\GridFieldSummary\\Tests\\": "tests/"
         }
     },
     "prefer-stable": true,
